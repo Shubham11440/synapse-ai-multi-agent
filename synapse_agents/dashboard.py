@@ -1,31 +1,70 @@
 """
 dashboard.py — Streamlit monitoring dashboard for the Synapse AI Company System.
-
-Run with:
-  streamlit run synapse_agents/dashboard.py
+Provides a visual interface to launch agent workflows and inspect telemetry logs.
 """
 from __future__ import annotations
 
 import sys
 import os
-import json
 import time
+from typing import Any
 
 # Ensure the package is importable from any cwd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import streamlit as st
 
-from monitoring import get_logs, get_summary
-from orchestrator import run_company_system, run_4agent, run_2agent
+import config
+from memory import MemoryStore
+from monitoring import get_logs, get_summary, monitor
+from schemas import PlannerOutput
+from orchestrator import run_2agent, run_4agent, run_company_system
+from agents import (
+    # Day 1
+    research_agent_d1,
+    summarizer_agent,
+    # Day 2
+    planner_agent,
+    research_agent_d2,
+    analyst_agent,
+    report_generator_agent,
+    # Final
+    company_planner_agent,
+    research_agent_company,
+    analyst_agent_company,
+    strategy_agent,
+    reviewer_agent,
+)
 
 # ---------------------------------------------------------------------------
-# Page config
+# Page configuration & custom CSS
 # ---------------------------------------------------------------------------
 st.set_page_config(
     page_title="Synapse AI — Monitoring Dashboard",
     page_icon="🤖",
     layout="wide",
+)
+
+# Custom Typography & Spacing CSS
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
+    html, body, [class*="css"]  {
+        font-family: 'Outfit', sans-serif;
+    }
+    .metric-card {
+        background-color: #1e293b;
+        border-radius: 8px;
+        padding: 16px;
+        border: 1px solid #334155;
+    }
+    .stProgress > div > div > div > div {
+        background-color: #3b82f6;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
 # ---------------------------------------------------------------------------
@@ -48,7 +87,9 @@ with st.sidebar:
         value="Create a go-to-market strategy for an AI customer support product.",
         height=120,
     )
-    run_btn = st.button("🚀 Run Workflow", use_container_width=True, type="primary")
+    
+    # Replace deprecated use_container_width=True with width="stretch"
+    run_btn = st.button("🚀 Run Workflow", width="stretch", type="primary")
     st.divider()
     st.caption("v1.0.0 | Synapse AI Labs")
 
@@ -63,23 +104,139 @@ st.markdown(
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Workflow Execution
+# Interactive Step-by-Step Executions (with live progress tracking)
 # ---------------------------------------------------------------------------
 if run_btn:
     if not query.strip():
         st.error("Please enter a business query.")
     else:
-        with st.spinner(f"Running {mode} pipeline..."):
+        # Create execution progress widgets
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        with st.spinner(f"Initiating {mode} workflow..."):
             start_t = time.monotonic()
+            results: dict[str, Any] = {}
             try:
                 if mode == "company":
-                    results = run_company_system(query)
+                    # Step 0: Memory recall
+                    status_text.markdown("🔍 **[Memory]** Recalling past context...")
+                    progress_bar.progress(5)
+                    memory = MemoryStore()
+                    past = memory.recall(query)
+                    recalled_ctx = None
+                    if past:
+                        recalled_ctx = (
+                            f"Past Summary: {past.get('executive_summary', '')}\n"
+                            f"Past Key Points: {', '.join(past.get('key_points', []))}"
+                        )
+                    time.sleep(1)
+
+                    # Step 1: Planner
+                    status_text.markdown("📋 **[Planner]** Executing Company Planner Agent...")
+                    progress_bar.progress(15)
+                    with monitor("company_planner_agent", query) as log:
+                        plan = company_planner_agent(query)
+                        log["output_chars"] = len(plan.model_dump_json())
+                    results["planner_output"] = plan
+                    time.sleep(1)
+
+                    # Step 2: Research
+                    status_text.markdown("🔬 **[Research]** Executing Research Agent...")
+                    progress_bar.progress(30)
+                    with monitor("research_agent_company", plan.objective) as log:
+                        research = research_agent_company(plan)
+                        log["output_chars"] = len(research.model_dump_json())
+                    results["research_output"] = research
+                    time.sleep(1)
+
+                    # Step 3: Analyst
+                    status_text.markdown("📊 **[Analyst]** Executing Analyst Agent...")
+                    progress_bar.progress(45)
+                    with monitor("analyst_agent_company", research.model_dump_json()) as log:
+                        analysis = analyst_agent_company(research, recalled_context=recalled_ctx)
+                        log["output_chars"] = len(analysis.model_dump_json())
+                    results["analysis_output"] = analysis
+                    time.sleep(1)
+
+                    # Step 4: Strategy
+                    status_text.markdown("💡 **[Strategy]** Executing Strategy Agent...")
+                    progress_bar.progress(60)
+                    with monitor("strategy_agent", analysis.model_dump_json()) as log:
+                        strategy = strategy_agent(analysis)
+                        log["output_chars"] = len(strategy.model_dump_json())
+                    results["strategy_output"] = strategy
+                    time.sleep(1)
+
+                    # Step 5: Report Generator
+                    status_text.markdown("📄 **[Report]** Executing Report Generator Agent...")
+                    progress_bar.progress(75)
+                    synthetic_plan = PlannerOutput(
+                        user_query=query,
+                        objective=plan.objective,
+                        subtasks=plan.subtasks,
+                        required_tools=["search_tool", "market_search_tool"],
+                        handoff_to="report_generator_agent",
+                    )
+                    with monitor("report_generator_agent", strategy.model_dump_json()) as log:
+                        report = report_generator_agent(synthetic_plan, research, analysis)
+                        log["output_chars"] = len(report.model_dump_json())
+                    results["final_report"] = report
+                    time.sleep(1)
+
+                    # Step 6: Reviewer
+                    status_text.markdown("🔍 **[Reviewer]** Executing Reviewer QA Agent...")
+                    progress_bar.progress(90)
+                    with monitor("reviewer_agent", report.model_dump_json()) as log:
+                        review = reviewer_agent(report)
+                        log["output_chars"] = len(review.model_dump_json())
+
+                    # Retry flow if rejected
+                    if not review.approved:
+                        status_text.markdown("⚠ **[Reviewer]** Report rejected. Initiating report revision...")
+                        time.sleep(1)
+                        with monitor("report_generator_agent_retry", strategy.model_dump_json(), retry_count=1) as log:
+                            report = report_generator_agent(synthetic_plan, research, analysis)
+                            log["output_chars"] = len(report.model_dump_json())
+                        status_text.markdown("🔍 **[Reviewer]** Re-evaluating revised report...")
+                        time.sleep(1)
+                        with monitor("reviewer_agent_retry", report.model_dump_json(), retry_count=1) as log:
+                            review = reviewer_agent(report)
+                            log["output_chars"] = len(review.model_dump_json())
+                        results["retry_occurred"] = True
+                    else:
+                        results["retry_occurred"] = False
+
+                    progress_bar.progress(100)
+                    status_text.markdown("✅ **[Success]** Workflow completed successfully.")
+                    results["final_report"] = report
+                    results["review_output"] = review
+                    memory.save_session("final_report", report)
+                    memory.save_session("review_output", review)
+                    memory.save_report(query, report.model_dump())
+
                 elif mode == "4agent":
+                    status_text.markdown("📋 **[Planner]** Decomposing subtasks...")
+                    progress_bar.progress(25)
                     results = run_4agent(query)
+                    progress_bar.progress(100)
+                    status_text.markdown("✅ **[Success]** 4-Agent pipeline finished.")
+
                 else:
+                    status_text.markdown("🔬 **[Research]** Scanning databases...")
+                    progress_bar.progress(50)
                     results = run_2agent(query)
+                    progress_bar.progress(100)
+                    status_text.markdown("✅ **[Success]** 2-Agent pipeline finished.")
+
                 elapsed_ms = round((time.monotonic() - start_t) * 1000)
                 st.success(f"✅ Workflow completed in **{elapsed_ms} ms**")
+                
+                # Store telemetry
+                results["elapsed_ms"] = elapsed_ms
+                results["provider"] = config.DEFAULT_PROVIDER
+                results["model"] = config.DEFAULT_MODEL
+                
                 st.session_state["last_results"] = results
                 st.session_state["last_mode"] = mode
                 st.session_state["last_query"] = query
@@ -95,7 +252,13 @@ if "last_results" in st.session_state:
     last_query = st.session_state.get("last_query", "")
 
     st.subheader("📋 Workflow Results")
-    st.caption(f"Query: *{last_query}* | Mode: **{mode_used}**")
+    
+    # Telemetry metadata row
+    col_t1, col_t2, col_t3, col_t4 = st.columns(4)
+    col_t1.metric("Provider", results.get("provider", config.DEFAULT_PROVIDER))
+    col_t2.metric("Model", results.get("model", config.DEFAULT_MODEL))
+    col_t3.metric("Execution Time", f"{results.get('elapsed_ms', 0) / 1000:.2f} s")
+    col_t4.metric("Review Retries", "1" if results.get("retry_occurred") else "0")
 
     # Final Report
     if "final_report" in results:
@@ -109,7 +272,7 @@ if "last_results" in st.session_state:
                 st.markdown(f"- {pt}")
             st.markdown("**Next Steps**")
             for ns in report_dict.get("next_steps", []):
-                st.markdown(f"→ {ns}")
+                st.markdown(f"-> {ns}")
 
     # Reviewer Output (company mode)
     if "review_output" in results:
@@ -167,12 +330,13 @@ stats = get_summary()
 
 # Stats row
 if stats.get("total_runs", 0) > 0:
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("Total Agent Calls", stats["total_runs"])
     m2.metric("Successful", stats["successful"])
     m3.metric("Failed", stats["failed"])
     m4.metric("Avg Latency", f"{stats['avg_duration_ms']} ms")
     m5.metric("Max Latency", f"{stats['max_duration_ms']} ms")
+    m6.metric("Total Retries", stats["retry_count"])
 else:
     st.info("No monitoring data yet. Run a workflow to start collecting metrics.")
 
@@ -187,10 +351,15 @@ if logs:
                 "Duration (ms)": log.get("duration_ms", "—"),
                 "Input Chars": log.get("input_chars", "—"),
                 "Output Chars": log.get("output_chars", "—"),
+                "Provider": log.get("provider", "—"),
+                "Model": log.get("model", "—"),
+                "Retry Count": log.get("retry_count", 0),
                 "Time": log.get("start_time", "")[:19].replace("T", " "),
                 "Error": log.get("error") or "",
             })
-        st.dataframe(display_logs, use_container_width=True)
+            
+        # Replace deprecated use_container_width=True with width="stretch"
+        st.dataframe(display_logs, width="stretch")
 
     with st.expander("🗄 Raw Logs (JSON)", expanded=False):
         st.json(logs[-10:])
