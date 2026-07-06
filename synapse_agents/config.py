@@ -20,14 +20,24 @@ load_dotenv()  # system fallback
 GEMINI_API_KEY: str | None = os.environ.get("GEMINI_API_KEY")
 OPENAI_API_KEY: str | None = os.environ.get("OPENAI_API_KEY")
 
-# Provider Detection
-# Prefer Gemini if available; fall back to OpenAI
-if GEMINI_API_KEY:
-    DEFAULT_PROVIDER: str = "Gemini"
-    DEFAULT_MODEL: str = os.environ.get("DEFAULT_MODEL", "gemini-2.5-flash")
+# Provider Detection & Selection
+DEFAULT_PROVIDER: str = os.environ.get("DEFAULT_PROVIDER", "").strip()
+
+if not DEFAULT_PROVIDER:
+    # Auto-detect based on key availability
+    if GEMINI_API_KEY:
+        DEFAULT_PROVIDER = "Gemini"
+    elif OPENAI_API_KEY:
+        DEFAULT_PROVIDER = "OpenAI"
+    else:
+        DEFAULT_PROVIDER = "Gemini"
+
+if DEFAULT_PROVIDER.lower() == "openai":
+    DEFAULT_PROVIDER = "OpenAI"
+    DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "gpt-4o-mini")
 else:
-    DEFAULT_PROVIDER: str = "OpenAI"
-    DEFAULT_MODEL: str = os.environ.get("DEFAULT_MODEL", "gpt-4o-mini")
+    DEFAULT_PROVIDER = "Gemini"
+    DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "gemini-2.5-flash")
 
 # LLM Options
 DEFAULT_TEMPERATURE: float = float(os.environ.get("LLM_TEMPERATURE", "0.2"))
