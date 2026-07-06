@@ -60,10 +60,10 @@ def _print_report(report) -> None:
     print(f"\n{_W}{_G}Executive Summary:{_X}\n{d.get('executive_summary', '')}")
     print(f"\n{_W}{_G}Key Points:{_X}")
     for pt in d.get("key_points", []):
-        print(f"  • {pt}")
+        print(f"  - {pt}")
     print(f"\n{_W}{_G}Next Steps:{_X}")
     for ns in d.get("next_steps", []):
-        print(f"  → {ns}")
+        print(f"  -> {ns}")
 
 
 def _comparison_table(mode: str) -> None:
@@ -124,7 +124,7 @@ def run_mode_2agent() -> None:
             baseline = single_agent(query)
             print(f"\n{_W}{_B}Single-Agent Summary:{_X}\n{baseline.executive_summary}")
         except Exception as exc:
-            print(f"{_R}{_W}✖ {exc}{_X}", file=sys.stderr)
+            print(f"{_R}{_W}[ERROR] {exc}{_X}", file=sys.stderr)
     _comparison_table("2agent")
 
 
@@ -142,7 +142,7 @@ def run_mode_4agent() -> None:
             baseline = single_agent(query)
             print(f"\n{_W}{_B}Single-Agent Summary:{_X}\n{baseline.executive_summary}")
         except Exception as exc:
-            print(f"{_R}{_W}✖ {exc}{_X}", file=sys.stderr)
+            print(f"{_R}{_W}[ERROR] {exc}{_X}", file=sys.stderr)
     _comparison_table("4agent")
 
 
@@ -164,7 +164,7 @@ def run_mode_company() -> None:
             baseline = single_agent(query)
             print(f"\n{_W}{_B}Single-Agent Summary:{_X}\n{baseline.executive_summary}")
         except Exception as exc:
-            print(f"{_R}{_W}✖ {exc}{_X}", file=sys.stderr)
+            print(f"{_R}{_W}[ERROR] {exc}{_X}", file=sys.stderr)
     _comparison_table("company")
 
 

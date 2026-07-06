@@ -45,16 +45,16 @@ def _banner(text: str) -> None:
     print(f"\n{_W}{_C}{'='*65}\n {text}\n{'='*65}{_X}")
 
 def _handoff(src: str, dst: str) -> None:
-    print(f"{_W}{_C}[Handoff] {src} → {dst}{_X}")
+    print(f"{_W}{_C}[Handoff] {src} -> {dst}{_X}")
 
 def _ok(msg: str) -> None:
-    print(f"{_G}✔ {msg}{_X}")
+    print(f"{_G}[OK] {msg}{_X}")
 
 def _info(msg: str) -> None:
-    print(f"{_B}ℹ {msg}{_X}")
+    print(f"{_B}[INFO] {msg}{_X}")
 
 def _warn(msg: str) -> None:
-    print(f"{_Y}⚠ {msg}{_X}")
+    print(f"{_Y}[WARNING] {msg}{_X}")
 
 
 # ---------------------------------------------------------------------------
