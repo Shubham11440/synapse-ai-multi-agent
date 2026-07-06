@@ -21,6 +21,7 @@ from typing import Literal
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from orchestrator import run_2agent, run_4agent, run_company_system
@@ -87,6 +88,12 @@ def _serialise(obj) -> dict | list | str | int | float | bool | None:
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+@app.get("/", include_in_schema=False)
+def root():
+    """Redirect to Swagger API documentation."""
+    return RedirectResponse(url="/docs")
+
 
 @app.get("/health", response_model=HealthResponse, tags=["System"])
 def health():
