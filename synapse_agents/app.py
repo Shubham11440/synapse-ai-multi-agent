@@ -1,36 +1,26 @@
 """
-app.py — FastAPI REST API for the Synapse AI Company System.
-
-Endpoints:
-  POST /run       — Run a workflow (mode: 2agent | 4agent | company)
-  GET  /health    — System health check
-  GET  /logs      — Return recent monitoring logs
-  GET  /summary   — Monitoring aggregate stats
-
-Run with:
-  uvicorn synapse_agents.app:app --reload --port 8000
+app.py — FastAPI REST API for the Synapse AI Orchestration Platform.
+Exposes routes to trigger pipelines and inspect performance/telemetry logs.
 """
 from __future__ import annotations
 
-import sys
 import os
+import sys
 import time
-from typing import Literal
+from typing import Literal, Any
 
-# Ensure the package directory is importable regardless of cwd
+# Ensure the package directory is importable regardless of CWD
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from orchestrator import run_2agent, run_4agent, run_company_system
+import config
+from orchestrator import run_2agent, run_4agent, run_company_system, memory
 from monitoring import get_logs, get_summary
 
-# ---------------------------------------------------------------------------
-# App setup
-# ---------------------------------------------------------------------------
-
+# Initialize FastAPI instance
 app = FastAPI(
     title="Synapse AI — Multi-Agent System API",
     description=(
@@ -41,7 +31,7 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------------
-# Request / Response schemas
+# Request / Response Schemas
 # ---------------------------------------------------------------------------
 
 class RunRequest(BaseModel):
@@ -52,30 +42,43 @@ class RunRequest(BaseModel):
     )
     mode: Literal["2agent", "4agent", "company"] = Field(
         default="company",
-        description="Which pipeline to run.",
+        description="Which pipeline mode to execute.",
     )
 
 
 class RunResponse(BaseModel):
-    status: str
-    mode: str
-    query: str
-    latency_ms: int
-    result: dict
+    status: str = Field(description="Execution result status (e.g. 'success').")
+    mode: str = Field(description="The pipeline mode that was executed.")
+    query: str = Field(description="The query that was submitted.")
+    latency_ms: int = Field(description="Workflow execution duration in milliseconds.")
+    result: dict[str, Any] = Field(description="Serialized output structures from all executing agents.")
 
 
 class HealthResponse(BaseModel):
-    status: str
-    version: str
-    available_modes: list[str]
+    status: str = Field(description="Overall system health status (e.g. 'healthy').")
+    provider: str = Field(description="Current primary LLM provider (Gemini or OpenAI).")
+    model: str = Field(description="Primary model name used by the system.")
+    memory: str = Field(description="Status of long-term memory storage ('ok' or error detail).")
+    logs: str = Field(description="Status of system logs storage ('ok' or error detail).")
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _serialise(obj) -> dict | list | str | int | float | bool | None:
-    """Recursively convert Pydantic models and nested structures to plain dicts."""
+def _serialise(obj: Any) -> Any:
+    """
+    Recursively converts Pydantic models and nested structures to plain primitive types.
+
+    Purpose:
+        Clean JSON output payload generation for API responses.
+
+    Arguments:
+        obj: The object to serialize.
+
+    Returns:
+        Primitive Python representation of the object (dict, list, str, etc.).
+    """
     if hasattr(obj, "model_dump"):
         return obj.model_dump()
     if isinstance(obj, dict):
@@ -90,29 +93,72 @@ def _serialise(obj) -> dict | list | str | int | float | bool | None:
 # ---------------------------------------------------------------------------
 
 @app.get("/", include_in_schema=False)
-def root():
-    """Redirect to Swagger API documentation."""
+def root() -> RedirectResponse:
+    """
+    Redirects root requests to Swagger UI docs.
+
+    Purpose:
+        Provide a friendly landing page pointing to developer endpoints.
+
+    Returns:
+        A RedirectResponse redirecting to '/docs'.
+    """
     return RedirectResponse(url="/docs")
 
 
 @app.get("/health", response_model=HealthResponse, tags=["System"])
-def health():
-    """Returns system health and available pipeline modes."""
+def health() -> HealthResponse:
+    """
+    Get system health and state of storage.
+
+    Purpose:
+        Perform diagnostics check on long-term memory and logs storage paths.
+
+    Returns:
+        A HealthResponse containing status of LLM provider and persistent storage.
+
+    Raises:
+        HTTPException: 500 error if vital storage checks fail.
+    """
+    # Verify memory store access
+    try:
+        memory._load()
+        memory_status = "ok"
+    except Exception as exc:
+        memory_status = f"error: {exc}"
+
+    # Verify logs accessibility
+    try:
+        get_logs(limit=1)
+        logs_status = "ok"
+    except Exception as exc:
+        logs_status = f"error: {exc}"
+
     return HealthResponse(
-        status="ok",
-        version="1.0.0",
-        available_modes=["2agent", "4agent", "company"],
+        status="healthy" if (memory_status == "ok" and logs_status == "ok") else "degraded",
+        provider=config.DEFAULT_PROVIDER,
+        model=config.DEFAULT_MODEL,
+        memory=memory_status,
+        logs=logs_status,
     )
 
 
 @app.post("/run", response_model=RunResponse, tags=["Workflow"])
-def run(request: RunRequest):
+def run(request: RunRequest) -> RunResponse:
     """
-    Run the multi-agent workflow for the given query and mode.
+    Execute a multi-agent workflow.
 
-    - **2agent**: Research + Summarizer (Day 1)
-    - **4agent**: Planner + Research + Analyst + Report (Day 2)
-    - **company**: Full 6-agent production system with monitoring + retry
+    Purpose:
+        Dispatch user strategy requests to the appropriate agent loop execution.
+
+    Arguments:
+        request: The RunRequest containing the query and pipeline mode.
+
+    Returns:
+        A RunResponse mapping output results and overall runtime latency.
+
+    Raises:
+        HTTPException: 422 error for guardrail violations, 500 for runtime failure.
     """
     start = time.monotonic()
 
@@ -126,7 +172,7 @@ def run(request: RunRequest):
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Workflow error: {exc}")
+        raise HTTPException(status_code=500, detail=f"Workflow execution failure: {exc}")
 
     latency_ms = round((time.monotonic() - start) * 1000)
     return RunResponse(
@@ -139,12 +185,31 @@ def run(request: RunRequest):
 
 
 @app.get("/logs", tags=["Monitoring"])
-def logs(limit: int = 50):
-    """Return the most recent monitoring log entries."""
+def logs(limit: int = 50) -> dict[str, list[dict[str, Any]]]:
+    """
+    Fetch recent telemetry logs.
+
+    Purpose:
+        Read structured performance telemetry entries.
+
+    Arguments:
+        limit: Max number of log items to retrieve.
+
+    Returns:
+        A dictionary mapping the key "logs" to a list of log records.
+    """
     return {"logs": get_logs(limit=limit)}
 
 
 @app.get("/summary", tags=["Monitoring"])
-def summary():
-    """Return aggregate monitoring statistics across all runs."""
+def summary() -> dict[str, Any]:
+    """
+    Get aggregate telemetry metrics.
+
+    Purpose:
+        Fetch aggregate latency, success rates, and active models.
+
+    Returns:
+        A telemetry summary dictionary.
+    """
     return get_summary()
