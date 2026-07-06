@@ -1,72 +1,68 @@
 """
-main.py — Unified CLI entrypoint for the Synapse multi-agent system.
-
-Usage:
-    python synapse_agents/main.py --mode 2agent    # Day 1
-    python synapse_agents/main.py --mode 4agent    # Day 2
-    python synapse_agents/main.py --mode company   # Final: 6-agent system
-    python synapse_agents/main.py --mode all       # Run all three in sequence
-    python synapse_agents/main.py                  # Defaults to 'company'
+main.py — Unified CLI entrypoint for Synapse AI.
+Provides runner scripts, baseline comparative metrics, and execution triggers.
 """
 from __future__ import annotations
 
 import argparse
-import json
+import logging
 import sys
 import time
-import os
+from typing import Any
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
+import config
 from orchestrator import run_2agent, run_4agent, run_company_system
-from orchestrator import _G, _B, _Y, _C, _R, _X, _W
 from agents import single_agent
 
-# ---------------------------------------------------------------------------
+# Initialize CLI Logger
+logger = logging.getLogger("SynapseAI")
+
 # Test queries per mode
-# ---------------------------------------------------------------------------
-QUERIES_2AGENT = [
+QUERIES_2AGENT: list[str] = [
     "How can AI agents improve customer support?",
     "How can AI agents help sales teams?",
     "What are the benefits of AI automation in operations?",
     "What is the weather in San Francisco?",       # triggers guardrail fallback
 ]
 
-QUERIES_4AGENT = [
+QUERIES_4AGENT: list[str] = [
     "Analyze the benefits of AI agents for customer support teams.",
     "Research how AI can improve sales productivity.",
     "Create a business analysis on AI automation in operations.",
 ]
 
-QUERIES_COMPANY = [
+QUERIES_COMPANY: list[str] = [
     "Create a go-to-market strategy for an AI customer support product.",
     "Analyze the opportunity for AI in customer success operations.",
     "Prepare a business case for AI-powered support automation.",
 ]
 
-_SLEEP = 15   # seconds between query blocks
+_SLEEP: int = config.RATE_LIMIT_SLEEP_SECONDS
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _section(title: str) -> None:
-    print(f"\n{_W}{_Y}{'#'*70}\n {title}\n{'#'*70}{_X}")
+    """Logs a section banner block."""
+    border = "#" * 70
+    logger.info(f"\n{border}\n {title}\n{border}")
 
 
-def _print_report(report) -> None:
+def _print_report(report: Any) -> None:
+    """Logs a formatted executive report summary."""
     d = report.model_dump() if hasattr(report, "model_dump") else report
-    print(f"\n{_W}{_G}Executive Summary:{_X}\n{d.get('executive_summary', '')}")
-    print(f"\n{_W}{_G}Key Points:{_X}")
+    msg = (
+        f"\nExecutive Summary:\n{d.get('executive_summary', '')}\n\n"
+        "Key Points:\n"
+    )
     for pt in d.get("key_points", []):
-        print(f"  - {pt}")
-    print(f"\n{_W}{_G}Next Steps:{_X}")
+        msg += f"  - {pt}\n"
+    msg += "\nNext Steps:\n"
     for ns in d.get("next_steps", []):
-        print(f"  -> {ns}")
+        msg += f"  -> {ns}\n"
+    logger.info(msg)
 
 
 def _comparison_table(mode: str) -> None:
+    """Logs a comparative table showing multi-agent vs single-agent features."""
     rows = {
         "2agent": [
             ("Agents Used",           "2 (Research + Summarizer)",         "1"),
@@ -96,14 +92,18 @@ def _comparison_table(mode: str) -> None:
         ],
     }
     col_label = {"2agent": "2-Agent", "4agent": "4-Agent", "company": "6-Agent Company"}[mode]
-    print(f"\n{_W}{_C}{'='*72}")
-    print(f" Comparison: {col_label} System vs Single-Agent Baseline")
-    print(f"{'='*72}{_X}")
-    print(f"| {'Metric':<28} | {col_label+' System':<26} | {'Single-Agent':<14} |")
-    print(f"|{'-'*30}|{'-'*28}|{'-'*16}|")
+    border = "=" * 72
+    table_msg = (
+        f"\n{border}\n"
+        f" Comparison: {col_label} System vs Single-Agent Baseline\n"
+        f"{border}\n"
+        f"| {'Metric':<28} | {col_label+' System':<26} | {'Single-Agent':<14} |\n"
+        f"|{'-'*30}|{'-'*28}|{'-'*16}|\n"
+    )
     for metric, multi, single in rows[mode]:
-        print(f"| {metric:<28} | {multi:<26} | {single:<14} |")
-    print(f"{_W}{_C}{'='*72}{_X}\n")
+        table_msg += f"| {metric:<28} | {multi:<26} | {single:<14} |\n"
+    table_msg += f"{border}\n"
+    logger.info(table_msg)
 
 
 # ---------------------------------------------------------------------------
@@ -111,60 +111,78 @@ def _comparison_table(mode: str) -> None:
 # ---------------------------------------------------------------------------
 
 def run_mode_2agent() -> None:
+    """
+    Run scenarios in 2-agent mode.
+
+    Purpose:
+        Iterate through test queries and print comparative summaries.
+    """
     _section("MODE: 2-AGENT PIPELINE (Day 1)")
     for i, query in enumerate(QUERIES_2AGENT):
         if i > 0:
-            print(f"{_Y}[Rate Limiter] Sleeping {_SLEEP}s...{_X}")
+            logger.warning(f"[Rate Limiter] Sleeping {_SLEEP}s...")
             time.sleep(_SLEEP)
-        print(f"\n{_W}{_C}>>> Scenario {i+1}/{len(QUERIES_2AGENT)}: {query}{_X}")
+        logger.info(f"\n>>> Scenario {i+1}/{len(QUERIES_2AGENT)}: {query}")
         try:
             result = run_2agent(query)
-            print(f"\n{_W}{_G}Summary:{_X}\n{result['summary'].final_summary}")
+            logger.info(f"\nSummary:\n{result['summary'].final_summary}")
             time.sleep(5)
             baseline = single_agent(query)
-            print(f"\n{_W}{_B}Single-Agent Summary:{_X}\n{baseline.executive_summary}")
+            logger.info(f"\nSingle-Agent Summary:\n{baseline.executive_summary}")
         except Exception as exc:
-            print(f"{_R}{_W}[ERROR] {exc}{_X}", file=sys.stderr)
+            logger.error(f"[ERROR] {exc}", exc_info=True)
     _comparison_table("2agent")
 
 
 def run_mode_4agent() -> None:
+    """
+    Run scenarios in 4-agent mode.
+
+    Purpose:
+        Iterate through test queries and print comparative reports.
+    """
     _section("MODE: 4-AGENT PIPELINE (Day 2)")
     for i, query in enumerate(QUERIES_4AGENT):
         if i > 0:
-            print(f"{_Y}[Rate Limiter] Sleeping {_SLEEP}s...{_X}")
+            logger.warning(f"[Rate Limiter] Sleeping {_SLEEP}s...")
             time.sleep(_SLEEP)
-        print(f"\n{_W}{_C}>>> Scenario {i+1}/{len(QUERIES_4AGENT)}: {query}{_X}")
+        logger.info(f"\n>>> Scenario {i+1}/{len(QUERIES_4AGENT)}: {query}")
         try:
             result = run_4agent(query)
             _print_report(result["final_report"])
             time.sleep(5)
             baseline = single_agent(query)
-            print(f"\n{_W}{_B}Single-Agent Summary:{_X}\n{baseline.executive_summary}")
+            logger.info(f"\nSingle-Agent Summary:\n{baseline.executive_summary}")
         except Exception as exc:
-            print(f"{_R}{_W}[ERROR] {exc}{_X}", file=sys.stderr)
+            logger.error(f"[ERROR] {exc}", exc_info=True)
     _comparison_table("4agent")
 
 
 def run_mode_company() -> None:
+    """
+    Run scenarios in 6-agent company mode.
+
+    Purpose:
+        Iterate through test queries and print full business strategies with review checks.
+    """
     _section("MODE: 6-AGENT COMPANY SYSTEM (Final Project)")
     for i, query in enumerate(QUERIES_COMPANY):
         if i > 0:
-            print(f"{_Y}[Rate Limiter] Sleeping {_SLEEP}s...{_X}")
+            logger.warning(f"[Rate Limiter] Sleeping {_SLEEP}s...")
             time.sleep(_SLEEP)
-        print(f"\n{_W}{_C}>>> Scenario {i+1}/{len(QUERIES_COMPANY)}: {query}{_X}")
+        logger.info(f"\n>>> Scenario {i+1}/{len(QUERIES_COMPANY)}: {query}")
         try:
             result = run_company_system(query)
             _print_report(result["final_report"])
             review = result.get("review_output")
             if review:
                 rd = review.model_dump() if hasattr(review, "model_dump") else review
-                print(f"\n{_W}{_G}Reviewer: approved={rd['approved']} score={rd['quality_score']}{_X}")
+                logger.info(f"\nReviewer: approved={rd['approved']} score={rd['quality_score']}")
             time.sleep(5)
             baseline = single_agent(query)
-            print(f"\n{_W}{_B}Single-Agent Summary:{_X}\n{baseline.executive_summary}")
+            logger.info(f"\nSingle-Agent Summary:\n{baseline.executive_summary}")
         except Exception as exc:
-            print(f"{_R}{_W}[ERROR] {exc}{_X}", file=sys.stderr)
+            logger.error(f"[ERROR] {exc}", exc_info=True)
     _comparison_table("company")
 
 
@@ -173,6 +191,12 @@ def run_mode_company() -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    """
+    CLI Entrypoint.
+
+    Purpose:
+        Parse command-line flags and dispatch execution tasks.
+    """
     parser = argparse.ArgumentParser(description="Synapse AI — unified multi-agent CLI")
     parser.add_argument(
         "--mode",
@@ -182,18 +206,21 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # Configure stdout logging handler dynamically for the CLI runner
+    logger.setLevel(logging.INFO)
+
     if args.mode in ("2agent", "all"):
         run_mode_2agent()
 
     if args.mode in ("4agent", "all"):
         if args.mode == "all":
-            print(f"\n{_Y}[Main] Sleeping {_SLEEP}s before 4-agent run...{_X}")
+            logger.warning(f"\n[Main] Sleeping {_SLEEP}s before 4-agent run...")
             time.sleep(_SLEEP)
         run_mode_4agent()
 
     if args.mode in ("company", "all"):
         if args.mode == "all":
-            print(f"\n{_Y}[Main] Sleeping {_SLEEP}s before company system run...{_X}")
+            logger.warning(f"\n[Main] Sleeping {_SLEEP}s before company system run...")
             time.sleep(_SLEEP)
         run_mode_company()
 
