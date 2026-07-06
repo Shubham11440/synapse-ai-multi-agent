@@ -1,18 +1,18 @@
 """
 tools.py — Unified mock knowledge-base and market research tools.
-
-search_tool(query)         → dict {results, sources}  — used by Day 1, Day 2
-market_search_tool(query)  → dict {results, sources}  — used by Final Project
-go_to_market_tool(query)   → dict {results, sources}  — GTM-specific data
-
-All tools share the same return signature so agents handle them identically.
+Supports keyword matching across customer support, sales, operations, and GTM.
 """
 from __future__ import annotations
+
+import logging
+from exceptions import SearchToolError
+
+logger = logging.getLogger("SynapseAI")
 
 # ---------------------------------------------------------------------------
 # Core knowledge base (Day 1 & Day 2)
 # ---------------------------------------------------------------------------
-_CORE_DB: dict[str, dict] = {
+_CORE_DB: dict[str, dict[str, list[str]]] = {
     "customer support": {
         "results": [
             "AI agents reduce customer support response times by up to 50% through automated FAQ routing.",
@@ -53,7 +53,7 @@ _CORE_ALIASES: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Market intelligence database (Final Project)
 # ---------------------------------------------------------------------------
-_MARKET_DB: dict[str, dict] = {
+_MARKET_DB: dict[str, dict[str, list[str]]] = {
     "ai support": {
         "results": [
             "The AI customer service market is projected to reach $11.5B by 2026 (CAGR 23%).",
@@ -96,8 +96,27 @@ _MARKET_ALIASES: dict[str, str] = {
 }
 
 
-def _lookup(query: str, db: dict, aliases: dict) -> dict:
-    """Generic keyword lookup against a database with alias fallback."""
+def _lookup(query: str, db: dict[str, dict[str, list[str]]], aliases: dict[str, str]) -> dict[str, list[str]]:
+    """
+    Look up key findings and sources from the database based on query.
+
+    Purpose:
+        Perform simple keyword matching to mock search operations.
+
+    Arguments:
+        query: The search term or prompt query.
+        db: The database dictionary to search against.
+        aliases: Alias mappings for fallback key lookups.
+
+    Returns:
+        A dictionary with "results" and "sources" lists.
+
+    Raises:
+        SearchToolError: If query parameter is empty.
+    """
+    if not query:
+        raise SearchToolError("Query query string cannot be empty.")
+
     q = query.lower()
     for key, data in db.items():
         if key in q:
@@ -111,24 +130,75 @@ def _lookup(query: str, db: dict, aliases: dict) -> dict:
     }
 
 
-def search_tool(query: str) -> dict:
-    """Core knowledge-base search — used by Day 1 and Day 2 agents."""
-    return _lookup(query, _CORE_DB, _CORE_ALIASES)
-
-
-def market_search_tool(query: str) -> dict:
-    """Market intelligence search — used by Final Project research agent."""
-    return _lookup(query, _MARKET_DB, _MARKET_ALIASES)
-
-
-def go_to_market_tool(query: str) -> dict:
+def search_tool(query: str) -> dict[str, list[str]]:
     """
-    Aggregates both core and market results for GTM-type queries.
-    Returns a merged dict with combined results and sources.
+    Search the core business database for facts.
+
+    Purpose:
+        Expose internal database findings for client workflow agents (Day 1 / Day 2).
+
+    Arguments:
+        query: Search query or business topic.
+
+    Returns:
+        A dictionary with results and sources list.
+
+    Raises:
+        SearchToolError: If search lookup fails.
     """
-    core = search_tool(query)
-    market = market_search_tool(query)
-    return {
-        "results": list(set(core["results"] + market["results"])),
-        "sources": list(set(core["sources"] + market["sources"])),
-    }
+    try:
+        return _lookup(query, _CORE_DB, _CORE_ALIASES)
+    except Exception as exc:
+        logger.error(f"Search tool lookup failed: {exc}")
+        raise SearchToolError(f"Core search tool encountered an error: {exc}", exc)
+
+
+def market_search_tool(query: str) -> dict[str, list[str]]:
+    """
+    Search the market intelligence database.
+
+    Purpose:
+        Provide market trends, CAGR, and sizing stats for the Final Project research agent.
+
+    Arguments:
+        query: Search query or business topic.
+
+    Returns:
+        A dictionary with results and sources list.
+
+    Raises:
+        SearchToolError: If market search lookup fails.
+    """
+    try:
+        return _lookup(query, _MARKET_DB, _MARKET_ALIASES)
+    except Exception as exc:
+        logger.error(f"Market search tool lookup failed: {exc}")
+        raise SearchToolError(f"Market search tool encountered an error: {exc}", exc)
+
+
+def go_to_market_tool(query: str) -> dict[str, list[str]]:
+    """
+    Merges both core and market databases to answer GTM requests.
+
+    Purpose:
+        Provide combined answers for enterprise launch strategies.
+
+    Arguments:
+        query: GTM topic or query.
+
+    Returns:
+        A dictionary with merged results and unique sources list.
+
+    Raises:
+        SearchToolError: If merged lookup fails.
+    """
+    try:
+        core = search_tool(query)
+        market = market_search_tool(query)
+        return {
+            "results": list(set(core["results"] + market["results"])),
+            "sources": list(set(core["sources"] + market["sources"])),
+        }
+    except Exception as exc:
+        logger.error(f"Go to market tool lookup failed: {exc}")
+        raise SearchToolError(f"GTM tool merged search encountered an error: {exc}", exc)
