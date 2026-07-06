@@ -1,0 +1,21 @@
+# Exclude HLD specifications as requested by the user
+HLD_SPECS.md
+
+# Python local environment exclusions
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+
+# Credentials / Environment files
+.env
+
+# System / Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
